@@ -1,9 +1,0 @@
-package com.yourapp.chess.repository;
-
-import com.yourapp.chess.model.entity.Game;
-import org.springframework.data.jpa.repository.JpaRepository;
-
-import java.util.UUID;
-
-public interface GameRepository extends JpaRepository<Game, UUID> {
-}
