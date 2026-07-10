@@ -19,7 +19,7 @@ public class GameSession {
     @Setter private String whiteSessionId;
     @Setter private String blackSessionId;
 
-    // is each player is currently connected
+    // whether each player is currently connected
     @Setter private boolean whiteConnected = false;
     @Setter private boolean blackConnected = false;
 

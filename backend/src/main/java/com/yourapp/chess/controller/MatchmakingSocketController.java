@@ -4,6 +4,7 @@ import com.yourapp.chess.model.dto.MatchmakingJoinRequest;
 import com.yourapp.chess.service.MatchmakingService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.stereotype.Controller;
 
 @Controller
@@ -13,8 +14,9 @@ public class MatchmakingSocketController {
     private final MatchmakingService matchmakingService;
 
     @MessageMapping("/matchmaking/join")
-    public void join(MatchmakingJoinRequest request) {
-        matchmakingService.joinQueue(request.clientId(), request.username());
+    public void join(MatchmakingJoinRequest request, SimpMessageHeaderAccessor headerAccessor) {
+        String stompSessionId = headerAccessor.getSessionId();
+        matchmakingService.joinQueue(request.clientId(), request.username(), stompSessionId);
     }
 
     @MessageMapping("/matchmaking/leave")

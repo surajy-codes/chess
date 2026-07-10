@@ -1,3 +1,5 @@
 package com.yourapp.chess.model.dto;
 
-public record MoveRequest(String from, String to, String promotion) {}
+import java.util.UUID;
+
+public record MoveRequest(UUID userId, String from, String to, String promotion) {}

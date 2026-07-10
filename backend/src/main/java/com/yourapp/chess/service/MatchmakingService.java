@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 @RequiredArgsConstructor
 public class MatchmakingService {
 
-    private record WaitingPlayer(UUID clientId, String username) {}
+    private record WaitingPlayer(UUID clientId, String username, String stompSessionId) {}
 
     private final Queue<WaitingPlayer> queue = new ConcurrentLinkedQueue<>();
 
@@ -26,8 +26,8 @@ public class MatchmakingService {
     private final GameService gameService;
     private final SimpMessagingTemplate messagingTemplate;
 
-    public synchronized void joinQueue(UUID clientId, String username) {
-        queue.add(new WaitingPlayer(clientId, username));
+    public synchronized void joinQueue(UUID clientId, String username, String stompSessionId) {
+        queue.add(new WaitingPlayer(clientId, username, stompSessionId));
         tryMatch();
     }
 
@@ -49,6 +49,10 @@ public class MatchmakingService {
         Game game = new Game(white, black);
         gameRepository.save(game);
         gameService.startSession(game.getId(), white.getId(), black.getId());
+
+        // register their STOMP sessions now so disconnect events can find the game
+        gameService.registerPlayerSession(game.getId(), white.getId(), p1.stompSessionId());
+        gameService.registerPlayerSession(game.getId(), black.getId(), p2.stompSessionId());
 
         notify(p1.clientId(), game.getId(), "WHITE", black.getUsername());
         notify(p2.clientId(), game.getId(), "BLACK", white.getUsername());
