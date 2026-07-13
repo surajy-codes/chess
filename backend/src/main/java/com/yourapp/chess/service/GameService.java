@@ -12,6 +12,7 @@ import com.yourapp.chess.repository.GameRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -36,6 +37,7 @@ public class GameService {
 
     private final SimpMessagingTemplate messagingTemplate;
     private final GameRepository gameRepository;
+    private final EloService eloService;
 
     // --- session lifecycle ---
 
@@ -185,11 +187,14 @@ public class GameService {
         messagingTemplate.convertAndSend("/topic/game/" + gameId + "/events", event);
     }
 
+    @Transactional
     private void persistResult(UUID gameId, GameResult result) {
         gameRepository.findById(gameId).ifPresent(game -> {
             game.setResult(result);
             game.setEndedAt(LocalDateTime.now());
             gameRepository.save(game);
+            // update both players' ratings - ABANDONED games are skipped inside EloService
+            eloService.updateRatings(game.getWhite(), game.getBlack(), result);
         });
     }
 

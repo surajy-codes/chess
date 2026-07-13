@@ -1,0 +1,50 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  gap: 1.5rem;
+}
+
+.logo {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.5px;
+}
+
+.title {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin-bottom: 1.4rem;
+  color: var(--text);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 1.2rem;
+}
+
+.form label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-top: 0.3rem;
+}
+
+.toggle {
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.link {
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.link:hover { text-decoration: underline; }
