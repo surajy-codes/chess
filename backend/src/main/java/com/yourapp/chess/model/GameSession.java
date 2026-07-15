@@ -15,16 +15,24 @@ public class GameSession {
     private final UUID blackUserId;
     private final Board board = new Board();
 
-    // current STOMP session IDs - updated on connect/reconnect, nulled on disconnect
-    @Setter private String whiteSessionId;
-    @Setter private String blackSessionId;
+    // current STOMP session IDs - updated on connect/reconnect, nulled on
+    // disconnect
+    @Setter
+    private String whiteSessionId;
+    @Setter
+    private String blackSessionId;
 
     // whether each player is currently connected
-    @Setter private boolean whiteConnected = false;
-    @Setter private boolean blackConnected = false;
+    @Setter
+    private boolean whiteConnected = false;
+    @Setter
+    private boolean blackConnected = false;
 
-    // handle to the grace-period timer so we can cancel it on reconnect
-    @Setter private ScheduledFuture<?> disconnectTimer;
+    // per-player grace-period timers so they can't overwrite each other
+    @Setter
+    private ScheduledFuture<?> whiteDisconnectTimer;
+    @Setter
+    private ScheduledFuture<?> blackDisconnectTimer;
 
     public GameSession(UUID gameId, UUID whiteUserId, UUID blackUserId) {
         this.gameId = gameId;

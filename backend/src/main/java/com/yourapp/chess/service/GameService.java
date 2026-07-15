@@ -1,6 +1,7 @@
 package com.yourapp.chess.service;
 
 import com.github.bhlangonijr.chesslib.Board;
+import com.github.bhlangonijr.chesslib.Piece;
 import com.github.bhlangonijr.chesslib.Side;
 import com.github.bhlangonijr.chesslib.Square;
 import com.github.bhlangonijr.chesslib.move.Move;
@@ -8,7 +9,9 @@ import com.yourapp.chess.model.GameSession;
 import com.yourapp.chess.model.dto.GameEventMessage;
 import com.yourapp.chess.model.dto.GameStateMessage;
 import com.yourapp.chess.model.entity.GameResult;
+import com.yourapp.chess.model.entity.User;
 import com.yourapp.chess.repository.GameRepository;
+import com.yourapp.chess.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -20,6 +23,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -30,13 +34,15 @@ public class GameService {
 
     private final Map<UUID, GameSession> activeSessions = new ConcurrentHashMap<>();
 
-    // reverse map: stompSessionId -> gameId, so disconnect events can find the game fast
+    // reverse map: stompSessionId -> gameId, so disconnect events can find the game
+    // fast
     private final Map<String, UUID> sessionToGame = new ConcurrentHashMap<>();
 
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
 
     private final SimpMessagingTemplate messagingTemplate;
     private final GameRepository gameRepository;
+    private final UserRepository userRepository;
     private final EloService eloService;
 
     // --- session lifecycle ---
@@ -48,21 +54,31 @@ public class GameService {
     // Called from GameSocketController when a player sends /app/game/{id}/rejoin
     public void registerPlayerSession(UUID gameId, UUID userId, String stompSessionId) {
         GameSession session = activeSessions.get(gameId);
-        if (session == null) return;
+        if (session == null)
+            return;
 
-        boolean wasDisconnected = session.isWhite(userId)
+        boolean isWhite = session.isWhite(userId);
+
+        boolean wasDisconnected = isWhite
                 ? !session.isWhiteConnected()
                 : !session.isBlackConnected();
 
-        boolean hadTimer = session.getDisconnectTimer() != null && !session.getDisconnectTimer().isDone();
+        // Check and cancel only THIS player's disconnect timer
+        ScheduledFuture<?> playerTimer = isWhite
+                ? session.getWhiteDisconnectTimer()
+                : session.getBlackDisconnectTimer();
+        boolean hadTimer = playerTimer != null && !playerTimer.isDone();
 
-        // cancel any running disconnect timer
         if (hadTimer) {
-            session.getDisconnectTimer().cancel(false);
-            session.setDisconnectTimer(null);
+            playerTimer.cancel(false);
+            if (isWhite) {
+                session.setWhiteDisconnectTimer(null);
+            } else {
+                session.setBlackDisconnectTimer(null);
+            }
         }
 
-        if (session.isWhite(userId)) {
+        if (isWhite) {
             session.setWhiteSessionId(stompSessionId);
             session.setWhiteConnected(true);
         } else {
@@ -72,49 +88,65 @@ public class GameService {
 
         sessionToGame.put(stompSessionId, gameId);
 
-        // it's a reconnect if they were disconnected AND a grace timer was running
+        // it's a reconnect if THEY were disconnected AND THEIR timer was running
         if (wasDisconnected && hadTimer) {
-            broadcastEvent(gameId, new GameEventMessage("OPPONENT_RECONNECTED", "Your opponent reconnected."));
+            String reconnectedColor = isWhite ? "WHITE" : "BLACK";
+            broadcastEvent(gameId, new GameEventMessage(
+                    "OPPONENT_RECONNECTED",
+                    "Your opponent reconnected.",
+                    reconnectedColor));
         }
     }
 
     // Called from SessionDisconnectEvent listener
     public void handleDisconnect(String stompSessionId) {
         UUID gameId = sessionToGame.remove(stompSessionId);
-        if (gameId == null) return;
+        if (gameId == null)
+            return;
 
         GameSession session = activeSessions.get(gameId);
-        if (session == null) return;
+        if (session == null)
+            return;
 
         boolean isWhite = stompSessionId.equals(session.getWhiteSessionId());
         boolean isBlack = stompSessionId.equals(session.getBlackSessionId());
 
-        if (!isWhite && !isBlack) return;
+        if (!isWhite && !isBlack)
+            return;
 
-        if (isWhite) session.setWhiteConnected(false);
-        if (isBlack) session.setBlackConnected(false);
+        if (isWhite)
+            session.setWhiteConnected(false);
+        if (isBlack)
+            session.setBlackConnected(false);
 
+        String disconnectedColor = isWhite ? "WHITE" : "BLACK";
         broadcastEvent(gameId, new GameEventMessage(
                 "OPPONENT_DISCONNECTED",
-                "Opponent disconnected. Waiting " + GRACE_PERIOD_SECONDS + "s..."
-        ));
+                "Opponent disconnected. Waiting " + GRACE_PERIOD_SECONDS + "s...",
+                disconnectedColor));
 
-        // start the grace period countdown
+        // start the grace period countdown on THIS player's timer only
         var timer = scheduler.schedule(
                 () -> handleGracePeriodExpired(gameId, isWhite),
                 GRACE_PERIOD_SECONDS,
-                TimeUnit.SECONDS
-        );
-        session.setDisconnectTimer(timer);
+                TimeUnit.SECONDS);
+        if (isWhite) {
+            session.setWhiteDisconnectTimer(timer);
+        } else {
+            session.setBlackDisconnectTimer(timer);
+        }
     }
 
     private void handleGracePeriodExpired(UUID gameId, boolean wasWhiteWhoLeft) {
         GameSession session = activeSessions.get(gameId);
-        if (session == null) return;
+        if (session == null)
+            return;
 
         // if they somehow reconnected just before the timer fired, abort
-        if (wasWhiteWhoLeft && session.isWhiteConnected()) return;
-        if (!wasWhiteWhoLeft && session.isBlackConnected()) return;
+        if (wasWhiteWhoLeft && session.isWhiteConnected())
+            return;
+        if (!wasWhiteWhoLeft && session.isBlackConnected())
+            return;
 
         GameResult result = wasWhiteWhoLeft ? GameResult.BLACK_WINS : GameResult.WHITE_WINS;
         persistResult(gameId, result);
@@ -126,7 +158,8 @@ public class GameService {
 
     public GameStateMessage applyMove(UUID gameId, UUID userId, String from, String to, String promotion) {
         GameSession session = activeSessions.get(gameId);
-        if (session == null) throw new IllegalArgumentException("No active game with that id");
+        if (session == null)
+            throw new IllegalArgumentException("No active game with that id");
 
         Board board = session.getBoard();
 
@@ -148,8 +181,17 @@ public class GameService {
         Square fromSq = Square.fromValue(from.toUpperCase());
         Square toSq = Square.fromValue(to.toUpperCase());
 
-        Move move = new Move(fromSq, toSq);
-        if (!board.legalMoves().contains(move)) throw new IllegalStateException("Illegal move");
+        // Build move with promotion piece if provided
+        Move move;
+        if (promotion != null && !promotion.isEmpty()) {
+            Piece promoPiece = resolvePromotionPiece(promotion, board.getSideToMove());
+            move = new Move(fromSq, toSq, promoPiece);
+        } else {
+            move = new Move(fromSq, toSq);
+        }
+
+        if (!board.legalMoves().contains(move))
+            throw new IllegalStateException("Illegal move");
 
         board.doMove(move);
 
@@ -169,7 +211,8 @@ public class GameService {
 
     public GameStateMessage getState(UUID gameId) {
         GameSession session = activeSessions.get(gameId);
-        if (session == null) throw new IllegalArgumentException("No active game with that id");
+        if (session == null)
+            throw new IllegalArgumentException("No active game with that id");
         return buildStateMessage(session.getBoard(), null);
     }
 
@@ -183,6 +226,16 @@ public class GameService {
 
     // --- helpers ---
 
+    private Piece resolvePromotionPiece(String promotion, Side side) {
+        return switch (promotion.toLowerCase()) {
+            case "q" -> side == Side.WHITE ? Piece.WHITE_QUEEN : Piece.BLACK_QUEEN;
+            case "r" -> side == Side.WHITE ? Piece.WHITE_ROOK : Piece.BLACK_ROOK;
+            case "b" -> side == Side.WHITE ? Piece.WHITE_BISHOP : Piece.BLACK_BISHOP;
+            case "n" -> side == Side.WHITE ? Piece.WHITE_KNIGHT : Piece.BLACK_KNIGHT;
+            default -> side == Side.WHITE ? Piece.WHITE_QUEEN : Piece.BLACK_QUEEN;
+        };
+    }
+
     private void broadcastEvent(UUID gameId, GameEventMessage event) {
         messagingTemplate.convertAndSend("/topic/game/" + gameId + "/events", event);
     }
@@ -193,8 +246,17 @@ public class GameService {
             game.setResult(result);
             game.setEndedAt(LocalDateTime.now());
             gameRepository.save(game);
-            // update both players' ratings - ABANDONED games are skipped inside EloService
-            eloService.updateRatings(game.getWhite(), game.getBlack(), result);
+
+            User white = game.getWhite() != null
+                    ? userRepository.findById(game.getWhite().getId()).orElse(game.getWhite())
+                    : null;
+            User black = game.getBlack() != null
+                    ? userRepository.findById(game.getBlack().getId()).orElse(game.getBlack())
+                    : null;
+
+            if (white != null && black != null) {
+                eloService.updateRatings(white, black, result);
+            }
         });
     }
 

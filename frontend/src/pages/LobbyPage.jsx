@@ -4,10 +4,10 @@ import { Client } from '@stomp/stompjs'
 import styles from './LobbyPage.module.css'
 
 export default function LobbyPage({ auth, onGame, onLogout }) {
-  const [searching, setSearching]   = useState(false)
-  const [roomId, setRoomId]         = useState('')
-  const [joinId, setJoinId]         = useState('')
-  const [error, setError]           = useState('')
+  const [searching, setSearching] = useState(false)
+  const [roomId, setRoomId] = useState('')
+  const [joinId, setJoinId] = useState('')
+  const [error, setError] = useState('')
   const clientRef = useRef(null)
   const clientIdRef = useRef(crypto.randomUUID())
 
@@ -32,6 +32,14 @@ export default function LobbyPage({ auth, onGame, onLogout }) {
     const data = await res.json()
     if (!res.ok) { setError('Failed to create room'); return }
     setRoomId(data.roomId)
+
+    // subscribe to be notified when someone joins this room
+    if (clientRef.current) {
+      clientRef.current.subscribe(`/topic/room/${data.roomId}/joined`, (msg) => {
+        const info = JSON.parse(msg.body)
+        onGame({ gameId: info.roomId, color: 'WHITE' })
+      })
+    }
   }
 
   async function joinRoom() {

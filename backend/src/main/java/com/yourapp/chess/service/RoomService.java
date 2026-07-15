@@ -8,6 +8,7 @@ import com.yourapp.chess.repository.GameRepository;
 import com.yourapp.chess.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import java.util.UUID;
 
@@ -18,6 +19,7 @@ public class RoomService {
     private final GameRepository gameRepository;
     private final UserRepository userRepository;
     private final GameService gameService;
+    private final SimpMessagingTemplate messagingTemplate;
 
     public CreateRoomResponse createRoom(String username) {
         User white = findOrCreateUser(username);
@@ -42,6 +44,10 @@ public class RoomService {
         gameRepository.save(game);
 
         gameService.startSession(game.getId(), game.getWhite().getId(), black.getId());
+
+        messagingTemplate.convertAndSend(
+                "/topic/room/" + roomId + "/joined",
+                new JoinRoomResponse(game.getId(), "WHITE", black.getUsername()));
 
         return new JoinRoomResponse(game.getId(), "BLACK", game.getWhite().getUsername());
     }
